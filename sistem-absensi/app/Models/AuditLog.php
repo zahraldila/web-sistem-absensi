@@ -22,6 +22,6 @@ class AuditLog extends Model
 
     public function akun(): BelongsTo
     {
-        return $this->belongsTo(Akun::class, 'akun_id', 'akun_id');
+        return $this->belongsTo(Akun::class, 'akun_id', 'id');
     }
 }

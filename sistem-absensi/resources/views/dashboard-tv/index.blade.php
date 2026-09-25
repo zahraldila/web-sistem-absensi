@@ -58,11 +58,11 @@
             <!-- Left: Logo & Company Name -->
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-white border border-slate-200 shadow-xs flex items-center justify-center p-1.5 overflow-hidden flex-shrink-0">
-                    <img src="{{ company_logo_url() }}" alt="Logo" class="w-full h-full object-contain">
+                    <img src="{{ $logoUrl }}" alt="Logo" class="w-full h-full object-contain">
                 </div>
                 <div>
                     <h1 class="text-base sm:text-lg font-black text-slate-900 tracking-tight leading-tight">
-                        PT Selada Indonesia Produktif
+                        {{ $organizationName }}
                     </h1>
                     <p class="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest mt-0.5">
                         Live Attendance Dashboard
@@ -423,7 +423,7 @@
 
                 get gridColsClass() {
                     const count = this.branchCards.length;
-                    if (count <= 1) return 'grid-cols-1 max-w-4xl mx-auto';
+                    if (count <= 1) return 'grid-cols-1';
                     if (count === 2) return 'grid-cols-1 lg:grid-cols-2';
                     if (count === 3) return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3';
                     return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
@@ -512,7 +512,7 @@
 
                 async fetchStats() {
                     try {
-                        const response = await fetch(`/api/tv-dashboard/stats?date=${this.date}`);
+                        const response = await fetch(`/api/tv/{{ $displayToken }}/stats?date=${this.date}`);
                         if (response.ok) {
                             const text = await response.text();
                             const cleanJson = text.replace(/^\uFEFF/, '').trim();

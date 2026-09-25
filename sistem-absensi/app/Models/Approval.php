@@ -17,8 +17,12 @@ class Approval extends Model
         'pengajuan_id',
         'pegawai_id',
         'jenis_pengajuan',
+        'lampiran',
         'tanggal_pengajuan',
+        'keterangan',
         'status_pengajuan',
+        'created_by',
+        'source',
     ];
 
     public function pegawai(): BelongsTo

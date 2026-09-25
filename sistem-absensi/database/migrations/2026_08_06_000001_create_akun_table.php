@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('username')->unique();
             $table->string('password');
             $table->string('role')->default('admin');
-            $table->foreignId('pegawai_id')->nullable()->constrained('pegawai')->nullOnDelete();
+            $table->foreignId('pegawai_id')->nullable()->constrained('pegawai', 'pegawai_id')->nullOnDelete();
             $table->rememberToken();
             $table->timestamps();
         });

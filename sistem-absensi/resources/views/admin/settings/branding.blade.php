@@ -30,7 +30,7 @@
                 @if($activeTab === 'branding')
                 Sesuaikan identitas visual sistem, pratinjau perubahan sebelum disimpan.
                 @elseif($activeTab === 'lokasi')
-                Kelola daftar kantor cabang, titik koordinat GPS presensi, radius kehadiran, serta jaringan Wi-Fi kantor.
+                Kelola daftar kantor cabang, titik koordinat GPS presensi, dan radius kehadiran.
                 @else
                 Kelola daftar role pengguna dan atur hak akses (privilege) fitur Web Admin untuk masing-masing role.
                 @endif
@@ -466,21 +466,7 @@
                             <span class="font-bold text-slate-800">{{ $lokasi->radius_meter }} Meter</span>
                         </div>
 
-                        {{-- Wi-Fi SSIDs --}}
-                        <div class="pt-2 flex flex-col gap-1.5">
-                            <span class="text-slate-400 font-semibold flex items-center gap-1.5">
-                                <i class="fa-solid fa-wifi text-slate-400"></i> Wi-Fi Kantor Terdaftar
-                            </span>
-                            <div class="flex flex-wrap gap-1.5 mt-0.5">
-                                @forelse($lokasi->wifis as $w)
-                                <span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-mono text-[11px] font-bold border border-slate-200">
-                                    {{ $w->ssid }}
-                                </span>
-                                @empty
-                                <span class="text-slate-400 italic text-[11px] font-medium">Belum ada Wi-Fi ditautkan</span>
-                                @endforelse
-                            </div>
-                        </div>
+
                     </div>
                 </div>
 
@@ -972,12 +958,7 @@
                                class="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-800 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary">
                     </div>
 
-                    {{-- Wi-Fi SSIDs --}}
-                    <div>
-                        <label class="text-xs font-bold text-slate-700">Nama SSID Wi-Fi Kantor <span class="text-xs text-slate-400 font-normal">(Pisahkan dengan koma jika lebih dari satu)</span></label>
-                        <input type="text" name="wifi_ssids" x-model="formLokasi.wifi_ssids"
-                               @if(!$canWifi) disabled title="Anda tidak memiliki hak akses untuk mengelola Wi-Fi kantor" class="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2.5 text-sm font-mono text-slate-400 opacity-60 cursor-not-allowed select-none" @else placeholder="Contoh: SIP, SIP-5G" class="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-mono text-slate-800 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary" @endif>
-                    </div>
+
 
                     {{-- Submit Buttons --}}
                     <div class="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
@@ -1456,21 +1437,18 @@ document.addEventListener('alpine:init', () => {
                 latitude: '',
                 longitude: '',
                 radius_meter: 100,
-                wifi_ssids: '',
             };
             this.showLokasiModal = true;
         },
 
         openModalEdit(lokasi) {
             this.isEdit = true;
-            const ssids = (lokasi.wifis || []).map(w => w.ssid).join(', ');
             this.formLokasi = {
                 lokasi_id: lokasi.lokasi_id,
                 nama_kantor: lokasi.nama_kantor,
                 latitude: lokasi.latitude,
                 longitude: lokasi.longitude,
                 radius_meter: lokasi.radius_meter,
-                wifi_ssids: ssids,
             };
             this.showLokasiModal = true;
         },

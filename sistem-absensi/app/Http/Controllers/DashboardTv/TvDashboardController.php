@@ -6,44 +6,64 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Models\Organization;
 
 class TvDashboardController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request, $displayToken)
     {
-        $date = $request->query('date', now()->toDateString());
-        $data = $this->fetchStats($date);
+        $org = Organization::where('display_token', $displayToken)->where('status', 'active')->firstOrFail();
         
+        $date = $request->query('date', now()->toDateString());
+        $data = $this->fetchStats($date, $org->organization_id);
+        
+        // Resolve branding without session
+        $logo = DB::table('settings')->where('organization_id', $org->organization_id)->where('key', 'company_logo')->value('value');
+        $logoUrl = asset('images/logo-sip.png');
+        if ($logo && trim($logo) !== '') {
+            $logo = trim($logo);
+            if (preg_match('/^https?:\/\//i', $logo)) {
+                $logoUrl = $logo;
+            } elseif (str_starts_with($logo, 'images/') || str_starts_with($logo, 'assets/') || str_starts_with($logo, 'storage/')) {
+                $logoUrl = asset($logo);
+            } else {
+                $bucket = config('supabase.assets_bucket', 'company-assets');
+                $supabaseUrl = rtrim(config('supabase.url'), '/');
+                $logo = ltrim($logo, '/');
+                $logoUrl = "{$supabaseUrl}/storage/v1/object/public/{$bucket}/{$logo}";
+            }
+        }
+
         return view('dashboard-tv.index', array_merge($data, [
             'selectedDate' => $date,
-            'isDemo' => $request->has('date')
+            'isDemo' => $request->has('date'),
+            'organizationName' => $org->nama_organisasi,
+            'logoUrl' => $logoUrl,
+            'displayToken' => $displayToken
         ]));
     }
 
-    public function getStats(Request $request)
+    public function getStats(Request $request, $displayToken)
     {
+        $org = Organization::where('display_token', $displayToken)->where('status', 'active')->firstOrFail();
         $date = $request->query('date', now()->toDateString());
-        $data = $this->fetchStats($date);
+        $data = $this->fetchStats($date, $org->organization_id);
         
         return response()->json($data);
     }
 
-    private function fetchStats($date)
+    private function fetchStats($date, $organizationId)
     {
         // 1. Fetch dynamic list of branches from database ordered by ID
         $branches = DB::table('lokasi_kantor')
+            ->where('organization_id', $organizationId)
             ->orderBy('lokasi_id', 'asc')
             ->get(['lokasi_id', 'nama_kantor', 'latitude', 'longitude', 'radius_meter']);
 
-        // Fetch registered office Wi-Fis linked to locations (sorted by SSID length desc)
-        $officeWifis = DB::table('wifi_kantor')
-            ->whereNotNull('lokasi_id')
-            ->where('aktif', true)
-            ->get()
-            ->sortByDesc(fn($w) => strlen($w->ssid));
 
         // 2. Total Pegawai (Aktif)
         $totalPegawai = DB::table('pegawai')
+            ->where('organization_id', $organizationId)
             ->where(function ($query) {
                 $query->where('status', 'Aktif')
                       ->orWhereNull('status')
@@ -57,6 +77,7 @@ class TvDashboardController extends Controller
             ->leftJoin('master_divisi', 'pegawai.divisi_id', '=', 'master_divisi.divisi_id')
             ->leftJoin('master_jabatan', 'pegawai.jabatan_id', '=', 'master_jabatan.jabatan_id')
             ->leftJoin('jadwal_kerja', 'absensi.jadwal_id', '=', 'jadwal_kerja.jadwal_id')
+            ->where('pegawai.organization_id', $organizationId)
             ->whereDate('absensi.tanggal_absensi', $date)
             ->whereNotNull('absensi.jam_checkin')
             ->whereIn(DB::raw('LOWER(TRIM(absensi.status_kehadiran))'), ['hadir', 'terlambat', 'tepat waktu'])
@@ -70,6 +91,7 @@ class TvDashboardController extends Controller
                 'absensi.latitude',
                 'absensi.longitude',
                 'absensi.catatan',
+                'absensi.lokasi_id',
                 'pegawai.nama_pegawai',
                 'pegawai.foto_profile',
                 'master_divisi.nama_divisi',
@@ -80,11 +102,10 @@ class TvDashboardController extends Controller
             ->orderBy('absensi.absensi_id', 'desc')
             ->get();
 
-        // 4. Group by pegawai_id to handle Multi-Session Check-in/Check-out (1 Employee = 1 Active/Latest Card)
+        // 4. Group by pegawai_id to handle Multi-Session Check-in/Check-out
         $groupedByPegawai = $allAttendances->groupBy('pegawai_id');
 
         $latestAttendances = $groupedByPegawai->map(function ($employeeAttendances) {
-            // Check if there is an active session (working / not yet checked out)
             $activeSession = $employeeAttendances->first(function ($a) {
                 return empty($a->jam_checkout);
             });
@@ -92,13 +113,11 @@ class TvDashboardController extends Controller
             if ($activeSession) {
                 $primary = $activeSession;
             } else {
-                // All sessions checked out -> pick the latest one based on checkout time / checkin time / id
                 $primary = $employeeAttendances->sortByDesc(function ($a) {
                     return $a->jam_checkout ?? $a->jam_checkin ?? $a->absensi_id;
                 })->first();
             }
 
-            // Calculate total accumulated duration across all completed sessions today
             $totalMinutes = 0;
             foreach ($employeeAttendances as $att) {
                 if ($att->jam_checkin && $att->jam_checkout) {
@@ -114,57 +133,49 @@ class TvDashboardController extends Controller
             return $primary;
         })->values();
 
-        // 5. Map records with dynamic branch determination
-        $mappedAttendances = $latestAttendances->map(function ($item) use ($branches, $officeWifis) {
+        // 5. Map records with branch determination
+        $mappedAttendances = $latestAttendances->map(function ($item) use ($branches) {
             $catatan = strtolower($item->catatan ?? '');
             
-            $matchedLocationId = null;
+            // Primary location from absensi
+            $matchedLocationId = $item->lokasi_id;
             $matchedLocationName = 'Remote';
 
-            // A. Check branch name in catatan first (e.g. "di Kantor Cikawao", "di Kantor Sulaksana")
-            foreach ($branches as $branch) {
-                $bName = strtolower($branch->nama_kantor);
-                $bShort = trim(str_replace('kantor', '', $bName));
-                if (str_contains($catatan, $bName) || (!empty($bShort) && strlen($bShort) >= 3 && str_contains($catatan, $bShort))) {
-                    $matchedLocationId = $branch->lokasi_id;
-                    $matchedLocationName = $branch->nama_kantor;
-                    break;
-                }
-            }
-
-            // B. Check Wi-Fi match if not matched by name
             if (!$matchedLocationId) {
-                foreach ($officeWifis as $wifi) {
-                    if (!empty($wifi->ssid) && str_contains($catatan, strtolower($wifi->ssid))) {
-                        $matchedLocationId = $wifi->lokasi_id;
+                // A. Check branch name in catatan first
+                foreach ($branches as $branch) {
+                    $bName = strtolower($branch->nama_kantor);
+                    $bShort = trim(str_replace('kantor', '', $bName));
+                    if (str_contains($catatan, $bName) || (!empty($bShort) && strlen($bShort) >= 3 && str_contains($catatan, $bShort))) {
+                        $matchedLocationId = $branch->lokasi_id;
                         break;
                     }
                 }
-            }
 
-            // C. If not matched by Wi-Fi or name, check Geo-Location coordinates against all branches
-            if (!$matchedLocationId && !empty($item->latitude) && !empty($item->longitude)) {
-                $lat = (float) $item->latitude;
-                $long = (float) $item->longitude;
 
-                $closestDist = PHP_FLOAT_MAX;
-                $closestBranch = null;
+                // C. Check Geo-Location
+                if (!$matchedLocationId && !empty($item->latitude) && !empty($item->longitude)) {
+                    $lat = (float) $item->latitude;
+                    $long = (float) $item->longitude;
 
-                foreach ($branches as $branch) {
-                    if ($branch->latitude && $branch->longitude) {
-                        $bLat = (float) $branch->latitude;
-                        $bLong = (float) $branch->longitude;
-                        $dist = sqrt(pow($lat - $bLat, 2) + pow($long - $bLong, 2));
-                        if ($dist < $closestDist) {
-                            $closestDist = $dist;
-                            $closestBranch = $branch;
+                    $closestDist = PHP_FLOAT_MAX;
+                    $closestBranch = null;
+
+                    foreach ($branches as $branch) {
+                        if ($branch->latitude && $branch->longitude) {
+                            $bLat = (float) $branch->latitude;
+                            $bLong = (float) $branch->longitude;
+                            $dist = sqrt(pow($lat - $bLat, 2) + pow($long - $bLong, 2));
+                            if ($dist < $closestDist) {
+                                $closestDist = $dist;
+                                $closestBranch = $branch;
+                            }
                         }
                     }
-                }
 
-                // If within reasonable proximity (~5km)
-                if ($closestBranch && $closestDist < 0.05) {
-                    $matchedLocationId = $closestBranch->lokasi_id;
+                    if ($closestBranch && $closestDist < 0.05) {
+                        $matchedLocationId = $closestBranch->lokasi_id;
+                    }
                 }
             }
 
@@ -174,18 +185,15 @@ class TvDashboardController extends Controller
                     $matchedLocationId = 'remote';
                     $matchedLocationName = 'Remote (WFH/WFC)';
                 } else {
-                    // Default headquarters is Kantor Sulaksana (ID: 1)
-                    $sulaksana = $branches->firstWhere('nama_kantor', 'Kantor Sulaksana') 
-                              ?? $branches->firstWhere('lokasi_id', 1) 
-                              ?? $branches->first();
-                    $matchedLocationId = $sulaksana?->lokasi_id ?? 1;
+                    $firstBranch = $branches->first();
+                    $matchedLocationId = $firstBranch?->lokasi_id;
                 }
             }
 
             // Resolve name
-            if ($matchedLocationId !== 'remote') {
+            if ($matchedLocationId && $matchedLocationId !== 'remote') {
                 $found = $branches->firstWhere('lokasi_id', (int)$matchedLocationId);
-                $matchedLocationName = $found ? $found->nama_kantor : 'Kantor Sulaksana';
+                $matchedLocationName = $found ? $found->nama_kantor : 'Unresolved Location';
             }
 
             $hasCheckOut = !empty($item->jam_checkout);
@@ -277,39 +285,44 @@ class TvDashboardController extends Controller
             ];
         });
 
-        // 6. Global Summary counts (strictly 1 count per unique employee)
+        // 6. Global Summary counts
         $totalHadir = $mappedAttendances->count();
         $sedangBekerja = $mappedAttendances->where('has_checkout', false)->count();
         $sudahCheckOut = $mappedAttendances->where('has_checkout', true)->count();
         $wfoCount = $mappedAttendances->where('skema', 'WFO')->count();
         $wfhCount = $mappedAttendances->whereIn('skema', ['WFH', 'WFC'])->count();
 
-        // Sakit & Izin
+        // Sakit & Izin scoped by organization
         $sakitCount = DB::table('pengajuan')
-            ->whereDate('tanggal_pengajuan', $date)
-            ->where('jenis_pengajuan', 'Sakit')
-            ->where('status_pengajuan', 'Disetujui')
-            ->distinct('pegawai_id')
-            ->count('pegawai_id');
+            ->join('pegawai', 'pengajuan.pegawai_id', '=', 'pegawai.pegawai_id')
+            ->where('pegawai.organization_id', $organizationId)
+            ->whereDate('pengajuan.tanggal_pengajuan', $date)
+            ->where('pengajuan.jenis_pengajuan', 'Sakit')
+            ->where('pengajuan.status_pengajuan', 'Disetujui')
+            ->distinct('pengajuan.pegawai_id')
+            ->count('pengajuan.pegawai_id');
 
         $izinCount = DB::table('pengajuan')
-            ->whereDate('tanggal_pengajuan', $date)
-            ->where('jenis_pengajuan', 'Izin')
-            ->where('status_pengajuan', 'Disetujui')
-            ->distinct('pegawai_id')
-            ->count('pegawai_id');
+            ->join('pegawai', 'pengajuan.pegawai_id', '=', 'pegawai.pegawai_id')
+            ->where('pegawai.organization_id', $organizationId)
+            ->whereDate('pengajuan.tanggal_pengajuan', $date)
+            ->where('pengajuan.jenis_pengajuan', 'Izin')
+            ->where('pengajuan.status_pengajuan', 'Disetujui')
+            ->distinct('pengajuan.pegawai_id')
+            ->count('pengajuan.pegawai_id');
 
         $belumHadir = max(0, $totalPegawai - $totalHadir - $sakitCount - $izinCount);
 
-        // 7. Dynamically group attendances for EVERY branch in the database
+        // 7. Group attendances for EVERY branch
         $branchCards = [];
+        $firstBranch = $branches->first();
         foreach ($branches as $branch) {
             $branchId = (string)$branch->lokasi_id;
             $branchName = $branch->nama_kantor;
-            $isHq = ($branch->lokasi_id == 1 || str_contains(strtolower($branchName), 'sulaksana'));
+            $isHq = $firstBranch && $branch->lokasi_id === $firstBranch->lokasi_id; // Set first branch as HQ
 
             $list = $mappedAttendances->filter(function ($i) use ($branchId, $branchName) {
-                return (string)$i['cabang_id'] === $branchId || str_contains(strtolower($i['cabang_label']), strtolower($branchName));
+                return (string)$i['cabang_id'] === $branchId;
             })->values();
 
             $working = $list->where('has_checkout', false)->count();

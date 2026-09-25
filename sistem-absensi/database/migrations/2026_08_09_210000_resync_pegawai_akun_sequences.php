@@ -18,25 +18,40 @@ return new class extends Migration
         }
 
         $this->resyncSequence($connection, 'pegawai', 'pegawai_id');
-        $this->resyncSequence($connection, 'akun', 'akun_id');
+        $this->resyncSequence($connection, 'akun', 'id');
     }
 
     protected function resyncSequence($connection, string $table, string $column): void
     {
-        $sequence = $connection->selectOne("SELECT pg_get_serial_sequence(?, ?) AS seq", [$table, $column]);
+        $sequence = $connection->selectOne(
+            "SELECT pg_get_serial_sequence(?, ?) AS seq",
+            [$table, $column]
+        );
 
         if (! $sequence || ! $sequence->seq) {
             return;
         }
 
-        $maxRow = $connection->selectOne("SELECT MAX(\"{$column}\") AS max_id FROM \"{$table}\"");
-        $maxId = $maxRow ? ($maxRow->max_id ?? 0) : 0;
+        $maxRow = $connection->selectOne(
+            "SELECT MAX(\"{$column}\") AS max_id FROM \"{$table}\""
+        );
+
+        $maxId = $maxRow?->max_id;
 
         if ($maxId === null) {
-            $maxId = 0;
+            // Table is empty: make the next generated ID = 1.
+            $connection->statement(
+                "SELECT setval(?, 1, false)",
+                [$sequence->seq]
+            );
+
+            return;
         }
 
-        $connection->statement("SELECT setval(?, ?, true)", [$sequence->seq, $maxId]);
+        $connection->statement(
+            "SELECT setval(?, ?, true)",
+            [$sequence->seq, $maxId]
+        );
     }
 
     /**

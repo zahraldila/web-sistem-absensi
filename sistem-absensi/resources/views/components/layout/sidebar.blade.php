@@ -11,11 +11,17 @@
 
             {{-- Company --}}
             <div class="flex flex-col">
+                @php
+                    $activeOrgId = \App\Helpers\OrganizationHelper::getActiveOrganizationId();
+                    $activeOrg = $activeOrgId ? \App\Models\Organization::find($activeOrgId) : null;
+                    $companyName = $activeOrg ? $activeOrg->nama_organisasi : 'Nama Perusahaan';
+                    $userRoleDisplay = Auth::user()?->roleAkses?->nama_role ?? Auth::user()?->role ?? 'User';
+                @endphp
                 <h2 class="text-[16px] font-semibold text-slate-900 leading-tight">
-                    PT Selada Indonesia Produktif
+                    {{ $companyName }}
                 </h2>
                 <p class="text-[12px] text-slate-500 font-medium">
-                    Admin
+                    {{ $userRoleDisplay }}
                 </p>
             </div>
         </div>

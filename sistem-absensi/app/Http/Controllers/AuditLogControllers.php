@@ -6,7 +6,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use App\Models\Pegawai;
-use App\Models\Attendance;  // Model Absensi
+use App\Models\Attendance;
+use App\Helpers\OrganizationHelper;
 
 class AuditLogControllers extends Controller
 {
@@ -20,6 +21,11 @@ class AuditLogControllers extends Controller
 
         if (!$akun_id) {
             return response()->json(['message' => 'Akun ID tidak disertakan.'], 400);
+        }
+        
+        $user = Auth::user();
+        if ($user && $user->akun_id != $akun_id) {
+            return response()->json(['message' => 'Anda tidak memiliki akses ke log audit akun ini.'], 403);
         }
 
         // Langsung tarik data milik akun tersebut
@@ -39,8 +45,10 @@ class AuditLogControllers extends Controller
     {
         $user = Auth::user();
 
-        $logs = DB::table('audit_log')
-            ->join('akun', 'audit_log.akun_id', '=', 'akun.akun_id')
+        $orgId = OrganizationHelper::requireActiveOrganization();
+
+        $query = DB::table('audit_log')
+            ->join('akun', 'audit_log.akun_id', '=', 'akun.id')
             ->leftJoin('pegawai', 'akun.pegawai_id', '=', 'pegawai.pegawai_id')
             ->select(
                 'audit_log.log_id',
@@ -50,23 +58,32 @@ class AuditLogControllers extends Controller
                 'akun.role',
                 'pegawai.nama_pegawai'
             )
-            ->orderBy('audit_log.waktu_log', 'desc')
-            ->paginate(15);
+            ->where('pegawai.organization_id', $orgId);
+        
+        $logs = $query->orderBy('audit_log.waktu_log', 'desc')->paginate(15);
 
-        $totalPegawai = Pegawai::whereDoesntHave('akun', function ($query) {
+        $totalPegawaiQuery = Pegawai::whereDoesntHave('akun', function ($query) {
             $query->whereRaw('LOWER(role) = ?', ['admin']);
-        })->where('status', 'Aktif')->count(); 
+        })->where('status', 'Aktif')
+          ->where('organization_id', $orgId);
         
-        $hadirHariIni = Attendance::where('tanggal_absensi', today())->count();
+        $totalPegawai = $totalPegawaiQuery->count(); 
         
-        $wfoCount = Attendance::where('tanggal_absensi', today())
+        $hadirQuery = Attendance::where('tanggal_absensi', today())
+            ->whereHas('pegawai', function($q) use ($orgId) {
+                $q->where('organization_id', $orgId);
+            });
+            
+        $hadirHariIni = (clone $hadirQuery)->count();
+        
+        $wfoCount = (clone $hadirQuery)
             ->where(function($query) {
                 $query->whereNull('skema_kerja')
                       ->orWhere('skema_kerja', 'WFO');
             })
             ->count();
 
-        $wfhWfcCount = Attendance::where('tanggal_absensi', today())
+        $wfhWfcCount = (clone $hadirQuery)
             ->whereIn('skema_kerja', ['WFH', 'WFC'])
             ->count();
 

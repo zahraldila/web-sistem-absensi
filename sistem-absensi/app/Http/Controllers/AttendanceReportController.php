@@ -17,9 +17,12 @@ class AttendanceReportController extends Controller
 {
     private function attendanceQuery(Request $request)
     {
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
+        
         $query = Attendance::with('pegawai.masterDivisi')
-            ->whereHas('pegawai', function ($q) {
-                $q->where('status', 'Aktif')
+            ->whereHas('pegawai', function ($q) use ($orgId) {
+                $q->where('organization_id', $orgId)
+                  ->where('status', 'Aktif')
                   ->whereDoesntHave('akun', function ($q2) {
                       $q2->where('role', 'admin');
                   });
@@ -151,8 +154,11 @@ class AttendanceReportController extends Controller
         $search = trim((string) $request->query('search', ''));
         $searchTerm = "%{$search}%";
 
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
+
         foreach ($dates as $date) {
             $query = Pegawai::with('masterDivisi')
+                ->where('organization_id', $orgId)
                 ->whereDoesntHave('absensi', function ($q) use ($date) {
                     $q->whereDate('tanggal_absensi', $date);
                 });
@@ -176,10 +182,21 @@ class AttendanceReportController extends Controller
                     continue;
                 }
 
+                // Cek apakah pegawai memiliki pengajuan yang disetujui pada tanggal ini
+                $pengajuanDisetujui = \DB::table('pengajuan')
+                    ->where('pegawai_id', $pegawai->pegawai_id)
+                    ->whereDate('tanggal_pengajuan', $date)
+                    ->where('status_pengajuan', 'Disetujui')
+                    ->first();
+
+                $statusKehadiran = $pengajuanDisetujui
+                    ? $pengajuanDisetujui->jenis_pengajuan   // "Sakit", "Izin", "Cuti", dll
+                    : 'Tidak Hadir';
+
                 $attendance = new Attendance();
                 $attendance->pegawai = $pegawai;
                 $attendance->tanggal_absensi = $date;
-                $attendance->status_kehadiran = 'Tidak Hadir';
+                $attendance->status_kehadiran = $statusKehadiran;
                 $attendance->jam_checkin = null;
                 $attendance->jam_checkout = null;
                 $attendance->skema_kerja = '-';

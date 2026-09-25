@@ -10,31 +10,46 @@ use App\Models\Pegawai;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Helpers\OrganizationHelper;
 
 class DashboardControllers extends Controller
 {
     public function admin(Request $request)
     {
+        $orgId = OrganizationHelper::requireActiveOrganization();
         $today = now()->toDateString();
 
-        $totalPegawai = Pegawai::whereDoesntHave('akun', function ($query) {
-            $query->whereRaw('LOWER(role) = ?', ['admin']);
-        })->where('status', 'Aktif')->count();
+        $totalPegawai = Pegawai::where('organization_id', $orgId)
+            ->whereDoesntHave('akun', function ($query) {
+                $query->whereRaw('LOWER(role) = ?', ['admin']);
+            })->where('status', 'Aktif')->count();
 
-        $hadirHariIni = Attendance::whereDate('tanggal_absensi', $today)
+        $hadirHariIni = Attendance::whereHas('pegawai', function ($q) use ($orgId) {
+                $q->where('organization_id', $orgId);
+            })
+            ->whereDate('tanggal_absensi', $today)
             ->distinct('pegawai_id')
             ->count('pegawai_id');
 
-        $wfoCount = Attendance::whereDate('tanggal_absensi', $today)
+        $wfoCount = Attendance::whereHas('pegawai', function ($q) use ($orgId) {
+                $q->where('organization_id', $orgId);
+            })
+            ->whereDate('tanggal_absensi', $today)
             ->where('skema_kerja', 'WFO')
             ->distinct('pegawai_id')
             ->count('pegawai_id');
 
-        $wfhWfcCount = Attendance::whereDate('tanggal_absensi', $today)
+        $wfhWfcCount = Attendance::whereHas('pegawai', function ($q) use ($orgId) {
+                $q->where('organization_id', $orgId);
+            })
+            ->whereDate('tanggal_absensi', $today)
             ->whereIn('skema_kerja', ['WFH', 'WFC'])
             ->count();
 
-        $liveCheckIns = Attendance::whereDate('tanggal_absensi', $today)
+        $liveCheckIns = Attendance::whereHas('pegawai', function ($q) use ($orgId) {
+                $q->where('organization_id', $orgId);
+            })
+            ->whereDate('tanggal_absensi', $today)
             ->whereNotNull('jam_checkin')
             ->with('pegawai')
             ->orderByDesc('jam_checkin')
@@ -53,7 +68,10 @@ class DashboardControllers extends Controller
                 ];
             });
 
-        $pendingApprovals = Approval::where('status_pengajuan', 'Pending')
+        $pendingApprovals = Approval::whereHas('pegawai', function ($q) use ($orgId) {
+                $q->where('organization_id', $orgId);
+            })
+            ->where('status_pengajuan', 'Pending')
             ->with('pegawai')
             ->orderByDesc('tanggal_pengajuan')
             ->limit(4)
@@ -70,6 +88,9 @@ class DashboardControllers extends Controller
             });
 
         $activities = AuditLog::query()
+            ->whereHas('akun.pegawai', function ($q) use ($orgId) {
+                $q->where('organization_id', $orgId);
+            })
             ->with('akun.pegawai')
             ->orderByDesc('waktu_log')
             ->limit(4)
@@ -93,7 +114,10 @@ class DashboardControllers extends Controller
             ]]);
         }
 
-        $jadwal = DB::table('jadwal_kerja')->orderByDesc('jadwal_id')->first();
+        $jadwal = DB::table('jadwal_kerja')
+            ->where('organization_id', $orgId)
+            ->orderByDesc('jadwal_id')
+            ->first();
         $jamMasuk = $jadwal ? Carbon::parse($jadwal->jam_masuk)->format('H:i') : '08:00';
         $jamPulang = $jadwal ? Carbon::parse($jadwal->jam_pulang)->format('H:i') : '17:00';
 
@@ -116,6 +140,8 @@ class DashboardControllers extends Controller
      */
     public function chartStatistik(Request $request)
     {
+        $orgId = OrganizationHelper::requireActiveOrganization();
+        
         $filter = $request->query('filter', 'minggu');
         $skemas = ['WFO', 'WFH/WFC', 'Izin', 'Alfa', 'Dinas'];
 
@@ -153,6 +179,9 @@ class DashboardControllers extends Controller
                         ELSE COUNT(*)
                     END as total")
                 )
+                ->whereHas('pegawai', function ($q) use ($orgId) {
+                    $q->where('organization_id', $orgId);
+                })
                 ->whereBetween('tanggal_absensi', [$start->toDateString(), $end->toDateString()])
                 ->groupBy('tgl', 'tipe')
                 ->get()
@@ -192,6 +221,9 @@ class DashboardControllers extends Controller
                         ELSE COUNT(*)
                     END as total")
                 )
+                ->whereHas('pegawai', function ($q) use ($orgId) {
+                    $q->where('organization_id', $orgId);
+                })
                 ->whereBetween('tanggal_absensi', [$start->toDateString(), $end->toDateString()])
                 ->groupBy('tipe', 'minggu_ke')
                 ->orderBy('minggu_ke')
@@ -237,6 +269,9 @@ class DashboardControllers extends Controller
                         ELSE COUNT(*)
                     END as total")
                 )
+                ->whereHas('pegawai', function ($q) use ($orgId) {
+                    $q->where('organization_id', $orgId);
+                })
                 ->whereYear('tanggal_absensi', $year)
                 ->groupBy('tipe', 'bulan_ke')
                 ->orderBy('bulan_ke')
@@ -266,6 +301,8 @@ class DashboardControllers extends Controller
      */
     public function simpanJamKerja(Request $request)
     {
+        $orgId = OrganizationHelper::requireActiveOrganization();
+        
         $request->validate([
             'jam_masuk'  => ['required', 'date_format:H:i'],
             'jam_pulang' => ['required', 'date_format:H:i', 'after:jam_masuk'],
@@ -278,11 +315,14 @@ class DashboardControllers extends Controller
         ]);
     
         // Update atau buat jadwal_kerja baru
-        // Kita asumsikan update jadwal_id = 1 (atau jadwal yang paling terakhir aktif)
-        $jadwalAktif = DB::table('jadwal_kerja')->orderByDesc('jadwal_id')->first();
+        $jadwalAktif = DB::table('jadwal_kerja')
+            ->where('organization_id', $orgId)
+            ->orderByDesc('jadwal_id')
+            ->first();
         
         if ($jadwalAktif) {
             DB::table('jadwal_kerja')
+                ->where('organization_id', $orgId)
                 ->where('jadwal_id', $jadwalAktif->jadwal_id)
                 ->update([
                     'jam_masuk'  => $request->jam_masuk,
@@ -291,6 +331,7 @@ class DashboardControllers extends Controller
                 ]);
         } else {
             DB::table('jadwal_kerja')->insert([
+                'organization_id' => $orgId,
                 'jam_masuk'  => $request->jam_masuk,
                 'jam_pulang' => $request->jam_pulang,
                 'tanggal_berlaku' => now()->toDateString(),

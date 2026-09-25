@@ -14,10 +14,16 @@ class MasterDivisi extends Model
 
     protected $fillable = [
         'nama_divisi',
+        'organization_id',
     ];
 
     public function pegawais(): HasMany
     {
         return $this->hasMany(Pegawai::class, 'divisi_id', 'divisi_id');
+    }
+
+    public function organization(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Organization::class, 'organization_id', 'organization_id');
     }
 }

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Role extends Model
 {
@@ -17,11 +18,17 @@ class Role extends Model
     protected $fillable = [
         'nama_role',
         'deskripsi',
+        'organization_id',
     ];
 
     public function akun(): HasMany
     {
         return $this->hasMany(Akun::class, 'role_id', 'role_id');
+    }
+
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class, 'organization_id', 'organization_id');
     }
 
     public function privileges(): BelongsToMany
@@ -32,7 +39,7 @@ class Role extends Model
 
     public function hasPrivilege(string $namaPrivilege): bool
     {
-        if (strtolower($this->nama_role) === 'super admin' || strtolower($this->nama_role) === 'admin') {
+        if (strtolower($this->nama_role) === 'super admin' && is_null($this->organization_id)) {
             return true;
         }
 

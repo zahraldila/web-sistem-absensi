@@ -16,8 +16,10 @@ Route::prefix('api')->middleware(['api'])->group(function () {
     Route::apiResource('submissions', App\Http\Controllers\SubmissionControllers::class)->middleware('auth:sanctum');
 
     // Dashboard
-    Route::get('dashboard/admin', [App\Http\Controllers\DashboardControllers::class, 'admin'])->middleware('auth:sanctum');
+    Route::get('dashboard/admin', [App\Http\Controllers\DashboardControllers::class, 'admin'])
+        ->middleware(['auth:sanctum', 'privilege:lihat_dashboard']);
 
     // Audit Log
-    Route::get('audit-log', [App\Http\Controllers\AuditLogControllers::class, 'index'])->middleware('auth:sanctum');
+    Route::get('audit-log', [App\Http\Controllers\AuditLogControllers::class, 'index'])
+        ->middleware(['auth:sanctum', 'privilege:lihat_log_aktivitas']);
 });

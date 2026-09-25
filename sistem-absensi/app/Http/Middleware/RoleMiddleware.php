@@ -18,8 +18,29 @@ class RoleMiddleware
             return redirect('/login');
         }
 
-        // Pada Tahap 3, pembatasan hak akses (enforcement) belum diterapkan ke rute /admin.
-        // Semua role (Super Admin, HR / HRD, Direktur, Pegawai) yang terautentikasi dapat mengakses halaman.
+        $userRole = null;
+        if (!empty($user->role_id) && $user->roleAkses) {
+            $userRole = $user->roleAkses->nama_role;
+        } else {
+            $userRole = $user->role;
+        }
+
+        if (empty($userRole)) {
+            abort(403, 'Akses ditolak: Anda tidak memiliki role yang valid.');
+        }
+
+        $hasRole = false;
+        foreach ($roles as $r) {
+            if (strtolower($userRole) === strtolower($r)) {
+                $hasRole = true;
+                break;
+            }
+        }
+
+        if (!$hasRole) {
+            abort(403, 'Akses ditolak: Role Anda tidak memiliki izin untuk halaman ini.');
+        }
+
         return $next($request);
     }
 }

@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use App\Helpers\logHelpers; // Wajib panggil helper log activity
 use Carbon\Carbon;
+use App\Helpers\OrganizationHelper;
 
 class AttendanceControllers extends Controller
 {
@@ -18,17 +19,48 @@ class AttendanceControllers extends Controller
         // 1. Ambil data user yang sedang login
         $user = Auth::user(); 
         
-        // Pastikan user memiliki relasi dengan pegawai
-        $pegawaiId = $user->pegawai_id ?? session('pegawai_id'); 
+        $orgId = OrganizationHelper::requireActiveOrganization();
+        
+        // Ambil pegawai_id dari request (jika dikirim oleh admin) atau fallback ke user auth
+        $pegawaiId = $request->input('pegawai_id', $user->pegawai_id ?? session('pegawai_id')); 
+
+        // Validasi ownership pegawai berdasarkan organization aktif
+        $pegawai = \App\Models\Pegawai::where('pegawai_id', $pegawaiId)
+            ->where('organization_id', $orgId)
+            ->first();
+
+        if (!$pegawai) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Data pegawai tidak ditemukan atau bukan milik organisasi Anda.'
+            ], 403);
+        }
 
         // 2. (Opsional) Validasi input dari mobile app
         $request->validate([
             'latitude'  => 'required|numeric',
             'longitude' => 'required|numeric',
             // 'foto_selfie' => 'required|image' // Buka komen jika ada upload foto
+            'lokasi_id' => 'nullable|integer'
         ]);
 
-        $activeSchedule = DB::table('jadwal_kerja')->orderByDesc('jadwal_id')->first();
+        if ($request->has('lokasi_id') && $request->lokasi_id != null) {
+            $validLocation = DB::table('lokasi_kantor')
+                ->where('lokasi_id', $request->lokasi_id)
+                ->where('organization_id', $orgId)
+                ->exists();
+            if (!$validLocation) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Lokasi absensi tidak valid atau bukan milik organisasi Anda.'
+                ], 403);
+            }
+        }
+
+        $activeSchedule = DB::table('jadwal_kerja')
+            ->where('organization_id', $orgId)
+            ->orderByDesc('jadwal_id')
+            ->first();
         $jadwalId = $activeSchedule ? $activeSchedule->jadwal_id : 1;
 
         // 3. Simpan data absensi ke database
@@ -41,6 +73,7 @@ class AttendanceControllers extends Controller
             'longitude'        => $request->longitude,
             'skema_kerja'      => $request->skema_kerja ?? 'WFO',
             'jadwal_id'        => $jadwalId,
+            'lokasi_id'        => $request->lokasi_id ?? null,
             // 'foto_selfie'   => $pathFoto,
         ]);
 
@@ -62,8 +95,22 @@ class AttendanceControllers extends Controller
      */
     public function checkOut(Request $request)
     {
+        $orgId = OrganizationHelper::requireActiveOrganization();
         $user = Auth::user();
-        $pegawaiId = $user->pegawai_id ?? session('pegawai_id');
+        
+        $pegawaiId = $request->input('pegawai_id', $user->pegawai_id ?? session('pegawai_id'));
+        
+        $pegawai = \App\Models\Pegawai::where('pegawai_id', $pegawaiId)
+            ->where('organization_id', $orgId)
+            ->first();
+
+        if (!$pegawai) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Data pegawai tidak ditemukan atau bukan milik organisasi Anda.'
+            ], 403);
+        }
+        
         $tanggalHariIni = Carbon::today();
 
         // 1. (Opsional) Validasi input lokasi check-out

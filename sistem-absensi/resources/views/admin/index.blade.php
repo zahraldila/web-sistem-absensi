@@ -357,10 +357,20 @@
 
             </div>
 
-            <div class="mt-4 sm:mt-5 pt-3 sm:pt-4">
+            <div class="mt-4 sm:mt-5 pt-3 sm:pt-4 space-y-2">
                 <a href="{{ route('admin.log-aktivitas') }}" class="block w-full text-center rounded-full border border-slate-200 py-2 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-50">
                     Lihat Semua Aktivitas
                 </a>
+                
+                @php
+                    $activeOrgToken = \App\Models\Organization::find(\App\Helpers\OrganizationHelper::requireActiveOrganization())?->display_token;
+                @endphp
+                @if($activeOrgToken)
+                <a href="{{ route('tv.dashboard', ['display_token' => $activeOrgToken]) }}" target="_blank" class="flex items-center justify-center gap-2 w-full text-center rounded-full bg-primary/10 border border-primary/20 py-2 text-[13px] font-semibold text-primary transition hover:bg-primary/20">
+                    <i class="fa-solid fa-tv"></i>
+                    Buka Monitoring TV
+                </a>
+                @endif
             </div>
 
         </div>

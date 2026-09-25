@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use App\Helpers\logHelpers; // Impor helper log
 use Carbon\Carbon;
+use App\Helpers\OrganizationHelper;
 
 class SubmissionControllers extends Controller
 {
@@ -17,7 +18,20 @@ class SubmissionControllers extends Controller
     {
         // 1. Ambil data user dan pegawai_id yang sedang login
         $user = Auth::user();
-        $pegawaiId = $user->pegawai_id ?? session('pegawai_id');
+        $orgId = OrganizationHelper::requireActiveOrganization();
+        
+        $pegawaiId = $request->input('pegawai_id', $user->pegawai_id ?? session('pegawai_id'));
+        
+        $pegawai = \App\Models\Pegawai::where('pegawai_id', $pegawaiId)
+            ->where('organization_id', $orgId)
+            ->first();
+
+        if (!$pegawai) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Data pegawai tidak ditemukan atau bukan milik organisasi Anda.'
+            ], 403);
+        }
 
         // 2. Validasi input dari aplikasi mobile
         $request->validate([

@@ -7,6 +7,7 @@
     $currentRole = Auth::user()?->roleAkses ?? null;
     $canApprove = $currentRole?->hasPrivilege('approve_pengajuan') ?? false;
     $canReject  = $currentRole?->hasPrivilege('reject_pengajuan') ?? false;
+    $canCatat   = $currentRole?->hasPrivilege('catat_absensi') ?? false;
 @endphp
 
 <div class="space-y-6 sm:space-y-8" x-data="approvalModal()">
@@ -15,16 +16,47 @@
     {{-- HEADER --}}
     {{-- ======================================== --}}
     <section class="flex flex-col gap-1 sm:gap-2">
-        
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+                <h1 class="text-2xl sm:text-[34px] font-bold text-slate-900 leading-tight">
+                    Persetujuan Pengajuan
+                </h1>
 
-        <h1 class="text-2xl sm:text-[34px] font-bold text-slate-900 leading-tight">
-            Persetujuan Pengajuan
-        </h1>
+                <p class="text-xs sm:text-[15px] text-slate-500">
+                    Pengelolaan Izin, Sakit, WFH, WFC, dan Dinas Pegawai
+                </p>
+            </div>
 
-        <p class="text-xs sm:text-[15px] text-slate-500">
-            Pengelolaan Izin, Sakit, WFH, WFC, dan Dinas Pegawai
-        </p>
+            @if($canCatat)
+                <button type="button" @click="openCreateModal()"
+                   class="inline-flex items-center gap-2 rounded-2xl bg-primary px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition hover:bg-primary-hover self-start sm:self-auto">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                    Tambah Catatan
+                </button>
+            @endif
+        </div>
     </section>
+
+    {{-- ======================================== --}}
+    {{-- FLASH SUCCESS BANNER --}}
+    {{-- ======================================== --}}
+    @if(session('success'))
+        <div
+            x-data="{ show: true }"
+            x-show="show"
+            x-init="setTimeout(() => show = false, 5000)"
+            x-transition
+            class="relative rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-xs sm:text-sm text-green-700">
+            <div class="pr-6">{{ session('success') }}</div>
+            <button type="button" @click="show = false" aria-label="Tutup notifikasi" class="absolute right-2 top-2 text-green-700 hover:text-green-900">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+    @endif
 
     {{-- ======================================== --}}
     {{-- INLINE FEEDBACK BANNER --}}
@@ -404,7 +436,123 @@
         </div>
     </div>
     </template>
+    {{-- ======================================== --}}
+    {{-- CREATE MODAL --}}
+    {{-- ======================================== --}}
+    <template x-teleport="body">
+        <div x-show="showCreateModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 overflow-y-auto" @click.self="closeCreateModal()">
+            <div class="relative w-full max-w-lg my-auto rounded-3xl sm:rounded-[28px] bg-white shadow-2xl ring-1 ring-slate-200" @click.stop>
+                
+                {{-- Header --}}
+                <div class="flex items-start justify-between border-b border-slate-200 px-5 sm:px-6 py-4">
+                    <div>
+                        <h2 class="text-lg sm:text-xl font-bold text-slate-900">Tambah Catatan Absensi</h2>
+                        <p class="mt-0.5 text-xs sm:text-sm text-slate-500">Catat kehadiran (WFO/WFH/WFC) atau pengajuan (Sakit/Izin/Cuti) atas nama pegawai.</p>
+                    </div>
+                    <button type="button" class="rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 shrink-0 ml-4"
+                        @click="closeCreateModal()" aria-label="Tutup modal">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
 
+                {{-- Form Body --}}
+                <form id="form-create-catatan" action="{{ route('admin.persetujuan.store') }}" method="POST" @submit="isProcessingCreate = true">
+                    @csrf
+                    
+                    {{-- Error Display Inside Modal --}}
+                    @if ($errors->any())
+                        <div class="mx-5 sm:mx-6 mt-4 rounded-xl border border-red-200 bg-red-50 p-4">
+                            <div class="flex items-start gap-3">
+                                <i class="fa-solid fa-circle-exclamation text-red-500 mt-0.5"></i>
+                                <div>
+                                    <h3 class="text-sm font-semibold text-red-800">Terdapat kesalahan pada input:</h3>
+                                    <ul class="mt-1 list-disc list-inside text-xs sm:text-sm text-red-700">
+                                        @foreach ($errors->all() as $error)
+                                            <li>{{ $error }}</li>
+                                        @endforeach
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    @endif
+
+                    <div class="px-5 sm:px-6 py-5 space-y-4">
+                        {{-- Pegawai --}}
+                        <div>
+                            @php
+                                $createPegawaiOptions = isset($pegawaiOptions) 
+                                    ? $pegawaiOptions->map(function($p) {
+                                        return ['value' => $p->pegawai_id, 'text' => $p->nama_pegawai];
+                                    })->toArray() 
+                                    : [];
+                            @endphp
+                            <x-forms.searchable-select 
+                                name="pegawai_id" 
+                                label="Pegawai *" 
+                                placeholder="Pilih Pegawai..."
+                                searchPlaceholder="Cari pegawai..."
+                                notFoundText="Pegawai tidak ditemukan"
+                                :showPlaceholderOption="false"
+                                :options="$createPegawaiOptions" 
+                                selected="{{ old('pegawai_id') }}" 
+                            />
+                        </div>
+
+                        {{-- Tanggal --}}
+                        <div>
+                            <label for="tanggal" class="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5">Tanggal <span class="text-red-500">*</span></label>
+                            <input type="date" name="tanggal" id="tanggal" value="{{ old('tanggal', date('Y-m-d')) }}" required class="block w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 sm:px-4 sm:py-3 text-xs sm:text-sm text-slate-900 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary" />
+                        </div>
+
+                        {{-- Jenis --}}
+                        <div>
+                            @php
+                                $createJenisOptions = isset($jenisOptions) 
+                                    ? collect($jenisOptions)->map(function($jo) {
+                                        return ['value' => $jo, 'text' => $jo];
+                                    })->toArray()
+                                    : [];
+                            @endphp
+                            <x-forms.searchable-select 
+                                name="jenis" 
+                                label="Jenis Catatan *" 
+                                placeholder="Pilih Jenis..."
+                                searchPlaceholder="Cari jenis..."
+                                notFoundText="Jenis catatan tidak ditemukan"
+                                :showPlaceholderOption="false"
+                                :options="$createJenisOptions" 
+                                selected="{{ old('jenis') }}" 
+                            />
+                            <p class="mt-1.5 text-[11px] text-slate-500">WFO/WFH/WFC akan masuk sebagai Kehadiran. Sisanya sebagai Pengajuan Disetujui.</p>
+                        </div>
+
+                        {{-- Keterangan --}}
+                        <div>
+                            <label for="keterangan" class="block text-xs sm:text-sm font-medium text-slate-700 mb-1.5">Keterangan <span class="text-slate-400 font-normal">(Opsional)</span></label>
+                            <textarea name="keterangan" id="keterangan" rows="3" class="block w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 sm:px-4 sm:py-3 text-xs sm:text-sm text-slate-900 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary" placeholder="Tuliskan keterangan atau alasan (misal: Sakit demam berdarah)...">{{ old('keterangan') }}</textarea>
+                        </div>
+                    </div>
+
+                    {{-- Footer --}}
+                    <div class="border-t border-slate-200 bg-white px-5 sm:px-6 py-4 grid grid-cols-2 gap-3 sm:flex sm:justify-end">
+                        <button type="button" @click="closeCreateModal()"
+                            class="w-full sm:w-auto inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-xs sm:text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                            Batal
+                        </button>
+                        <button type="submit" 
+                            class="w-full sm:w-auto inline-flex items-center justify-center rounded-2xl bg-primary px-5 py-2.5 text-xs sm:text-sm font-semibold text-white transition hover:bg-primary-hover shadow-sm"
+                            :disabled="isProcessingCreate">
+                            <span x-show="!isProcessingCreate">Simpan Catatan</span>
+                            <span x-show="isProcessingCreate">Menyimpan...</span>
+                        </button>
+                    </div>
+                </form>
+
+            </div>
+        </div>
+    </template>
 
 </div>
 
@@ -597,6 +745,8 @@
             showDetail: false,
             showRejectModal: false,
             showApproveConfirm: false,
+            showCreateModal: {{ $errors->any() ? 'true' : 'false' }},
+            isProcessingCreate: false,
             approveData: {
                 approval_id: null,
                 jenis_pengajuan: '',
@@ -640,6 +790,23 @@
             },
             closeDetail() {
                 this.showDetail = false;
+            },
+            openCreateModal() {
+                this.showCreateModal = true;
+                this.$nextTick(() => {
+                    document.getElementById('form-create-catatan').querySelectorAll('.searchable-select-component').forEach(el => {
+                        el.dispatchEvent(new CustomEvent('reset-component'));
+                    });
+                });
+            },
+            closeCreateModal() {
+                this.showCreateModal = false;
+                this.$nextTick(() => {
+                    document.getElementById('form-create-catatan').querySelectorAll('.searchable-select-component').forEach(el => {
+                        el.dispatchEvent(new CustomEvent('close-component'));
+                    });
+                    document.getElementById('form-create-catatan').reset();
+                });
             },
             detailInitials() {
                 if (!this.detailData.nama_pegawai) return 'U';

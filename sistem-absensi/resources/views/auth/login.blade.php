@@ -17,18 +17,11 @@
 </style>
 <div class="rounded-3xl sm:rounded-[40px] border border-slate-100 bg-white px-5 py-7 sm:px-8 sm:py-10 shadow-2xl">
 
-    {{-- Logo --}}
-    <div class="mb-5 sm:mb-6 flex justify-center">
-        <img
-            src="{{ company_logo_url() }}"
-            alt="Logo SIP"
-            class="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl object-cover shadow-lg"
-            onerror="this.onerror=null; this.src='https://via.placeholder.com/150/000000/FFFFFF?text=SIP';" />
+    {{-- Brand --}}
+    <div class="mb-5 sm:mb-6 flex flex-col justify-center items-center">
+        <h1 class="text-center text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">Sistem Absensi</h1>
+        <p class="mt-1.5 sm:mt-2 text-center text-sm sm:text-base font-medium text-slate-500">Integrated Attendance System</p>
     </div>
-
-    {{-- Heading --}}
-    <h1 class="text-center text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">Selamat Datang</h1>
-    <p class="mt-1.5 sm:mt-2 text-center text-sm sm:text-base font-medium text-slate-500">Silahkan masuk ke akun anda</p>
 
     {{-- Status Alert (e.g. Password reset success) --}}
     @if (session('status'))

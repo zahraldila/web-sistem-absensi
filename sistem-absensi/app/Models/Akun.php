@@ -11,7 +11,7 @@ class Akun extends Authenticatable
     use Notifiable;
 
     protected $table = 'akun';
-    protected $primaryKey = 'akun_id';
+    protected $primaryKey = 'id';
     public $incrementing = true;
     protected $keyType = 'int';
     public $timestamps = false;
@@ -67,5 +67,13 @@ class Akun extends Authenticatable
     public function getRoleAttribute($value): ?string
     {
         return $this->roleAkses?->nama_role ?? $value;
+    }
+
+    /**
+     * Accessor untuk backward compatibility $akun->akun_id
+     */
+    public function getAkunIdAttribute()
+    {
+        return $this->attributes['id'] ?? null;
     }
 }

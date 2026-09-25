@@ -16,13 +16,23 @@ class ApprovalControllers extends Controller
 {
     public function index(Request $request)
     {
-        $pending = Approval::where('status_pengajuan', 'Pending')->count();
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
+        
+        $pending = Approval::whereHas('pegawai', function($q) use ($orgId) {
+            $q->where('organization_id', $orgId);
+        })->where('status_pengajuan', 'Pending')->count();
     
-        $disetujui = Approval::where('status_pengajuan', 'Disetujui')->count();
+        $disetujui = Approval::whereHas('pegawai', function($q) use ($orgId) {
+            $q->where('organization_id', $orgId);
+        })->where('status_pengajuan', 'Disetujui')->count();
     
-        $ditolak = Approval::where('status_pengajuan', 'Ditolak')->count();
+        $ditolak = Approval::whereHas('pegawai', function($q) use ($orgId) {
+            $q->where('organization_id', $orgId);
+        })->where('status_pengajuan', 'Ditolak')->count();
     
-        $query = Approval::with('pegawai.masterDivisi');
+        $query = Approval::with('pegawai.masterDivisi')->whereHas('pegawai', function($q) use ($orgId) {
+            $q->where('organization_id', $orgId);
+        });
     
         /*
         |--------------------------------------------------------------------------
@@ -83,6 +93,9 @@ class ApprovalControllers extends Controller
             ->withQueryString();
 
         $jenisPengajuan = Approval::query()
+            ->whereHas('pegawai', function($q) use ($orgId) {
+                $q->where('organization_id', $orgId);
+            })
             ->whereNotNull('jenis_pengajuan')
             ->where('jenis_pengajuan', '!=', '')
             ->select('jenis_pengajuan')
@@ -91,6 +104,7 @@ class ApprovalControllers extends Controller
             ->pluck('jenis_pengajuan');
         
         $pegawai = Pegawai::query()
+            ->where('organization_id', $orgId)
             ->where('status', 'Aktif')
             ->whereDoesntHave('akun', function ($q) {
                 $q->where('role', 'admin');
@@ -121,12 +135,18 @@ class ApprovalControllers extends Controller
             ]);
         }
     
-        /*
-        |--------------------------------------------------------------------------
-        | Full Page
-        |--------------------------------------------------------------------------
-        */
-    
+        $pegawaiOptions = Pegawai::query()
+            ->where('organization_id', $orgId)
+            ->where('status', 'Aktif')
+            ->orderBy('nama_pegawai')
+            ->get(['pegawai_id', 'nama_pegawai']);
+
+        $jenisOptions = [
+            'WFO', 'WFH', 'WFC',
+            'Sakit', 'Izin', 'Cuti', 'Dinas',
+            'Tidak Masuk', 'Lainnya',
+        ];
+
         return view(
             'admin.persetujuan.index',
             compact(
@@ -136,7 +156,9 @@ class ApprovalControllers extends Controller
                 'ditolak',
                 'status',
                 'jenisPengajuan',
-                'pegawai'
+                'pegawai',
+                'pegawaiOptions',
+                'jenisOptions'
             )
         );
     }
@@ -297,7 +319,14 @@ class ApprovalControllers extends Controller
             ], 401);
         }
 
-        $pengajuan = DB::table('pengajuan')->where('pengajuan_id', $pengajuanId)->first();
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
+        
+        $pengajuan = DB::table('pengajuan')
+            ->join('pegawai', 'pegawai.pegawai_id', '=', 'pengajuan.pegawai_id')
+            ->where('pegawai.organization_id', $orgId)
+            ->where('pengajuan.pengajuan_id', $pengajuanId)
+            ->select('pengajuan.*')
+            ->first();
         if (!$pengajuan) {
             return response()->json([
                 'status' => 'error',
@@ -364,9 +393,9 @@ class ApprovalControllers extends Controller
 
             // Ambil data statistik counter terkini
             $counts = [
-                'pending'   => DB::table('pengajuan')->where('status_pengajuan', 'Pending')->count(),
-                'disetujui' => DB::table('pengajuan')->where('status_pengajuan', 'Disetujui')->count(),
-                'ditolak'   => DB::table('pengajuan')->where('status_pengajuan', 'Ditolak')->count(),
+                'pending'   => DB::table('pengajuan')->join('pegawai', 'pegawai.pegawai_id', '=', 'pengajuan.pegawai_id')->where('pegawai.organization_id', $orgId)->where('status_pengajuan', 'Pending')->count(),
+                'disetujui' => DB::table('pengajuan')->join('pegawai', 'pegawai.pegawai_id', '=', 'pengajuan.pegawai_id')->where('pegawai.organization_id', $orgId)->where('status_pengajuan', 'Disetujui')->count(),
+                'ditolak'   => DB::table('pengajuan')->join('pegawai', 'pegawai.pegawai_id', '=', 'pengajuan.pegawai_id')->where('pegawai.organization_id', $orgId)->where('status_pengajuan', 'Ditolak')->count(),
             ];
 
             return response()->json([
@@ -408,7 +437,14 @@ class ApprovalControllers extends Controller
             'catatan_admin.max'      => 'Alasan penolakan maksimal 1000 karakter.',
         ]);
 
-        $pengajuan = DB::table('pengajuan')->where('pengajuan_id', $pengajuanId)->first();
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
+        
+        $pengajuan = DB::table('pengajuan')
+            ->join('pegawai', 'pegawai.pegawai_id', '=', 'pengajuan.pegawai_id')
+            ->where('pegawai.organization_id', $orgId)
+            ->where('pengajuan.pengajuan_id', $pengajuanId)
+            ->select('pengajuan.*')
+            ->first();
         if (!$pengajuan) {
             return response()->json([
                 'status' => 'error',
@@ -475,9 +511,9 @@ class ApprovalControllers extends Controller
 
             // Ambil data statistik counter terkini
             $counts = [
-                'pending'   => DB::table('pengajuan')->where('status_pengajuan', 'Pending')->count(),
-                'disetujui' => DB::table('pengajuan')->where('status_pengajuan', 'Disetujui')->count(),
-                'ditolak'   => DB::table('pengajuan')->where('status_pengajuan', 'Ditolak')->count(),
+                'pending'   => DB::table('pengajuan')->join('pegawai', 'pegawai.pegawai_id', '=', 'pengajuan.pegawai_id')->where('pegawai.organization_id', $orgId)->where('status_pengajuan', 'Pending')->count(),
+                'disetujui' => DB::table('pengajuan')->join('pegawai', 'pegawai.pegawai_id', '=', 'pengajuan.pegawai_id')->where('pegawai.organization_id', $orgId)->where('status_pengajuan', 'Disetujui')->count(),
+                'ditolak'   => DB::table('pengajuan')->join('pegawai', 'pegawai.pegawai_id', '=', 'pengajuan.pegawai_id')->where('pegawai.organization_id', $orgId)->where('status_pengajuan', 'Ditolak')->count(),
             ];
 
             return response()->json([
@@ -513,5 +549,164 @@ class ApprovalControllers extends Controller
             'status'  => 'error',
             'message' => 'Status approval tidak valid. Pilih Disetujui atau Ditolak.',
         ], 422);
+    }
+
+    /**
+     * Simpan catatan absensi yang dibuat oleh admin/role berwenang.
+     *
+     * WFO/WFH/WFC → insert ke tabel absensi
+     * Sakit/Izin/Cuti/Dinas/Tidak Masuk/Lainnya → insert ke tabel pengajuan
+     */
+    public function store(Request $request)
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return redirect('/login');
+        }
+
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
+
+        // Validasi input
+        $request->validate([
+            'pegawai_id' => 'required|integer',
+            'tanggal'    => 'required|date',
+            'jenis'      => 'required|string|max:50',
+            'keterangan' => 'nullable|string|max:2000',
+        ], [
+            'pegawai_id.required' => 'Pegawai wajib dipilih.',
+            'tanggal.required'    => 'Tanggal wajib diisi.',
+            'jenis.required'      => 'Jenis catatan wajib dipilih.',
+        ]);
+
+        $pegawaiId  = $request->input('pegawai_id');
+        $tanggal    = $request->input('tanggal');
+        $jenis      = $request->input('jenis');
+        $keterangan = $request->input('keterangan');
+
+        // Validasi pegawai milik organization aktif
+        $pegawai = Pegawai::where('pegawai_id', $pegawaiId)
+            ->where('organization_id', $orgId)
+            ->where('status', 'Aktif')
+            ->first();
+
+        if (! $pegawai) {
+            return back()
+                ->withErrors(['pegawai_id' => 'Pegawai tidak ditemukan atau bukan milik organisasi Anda.'])
+                ->withInput();
+        }
+
+        $jenisAbsensi = ['WFO', 'WFH', 'WFC'];
+        $jenisPengajuan = ['Sakit', 'Izin', 'Cuti', 'Dinas', 'Tidak Masuk', 'Lainnya'];
+
+        if (in_array($jenis, $jenisAbsensi, true)) {
+            // ── WFO / WFH / WFC → insert ke tabel absensi ──
+
+            // Cek duplicate
+            $existingAbsensi = DB::table('absensi')
+                ->where('pegawai_id', $pegawaiId)
+                ->whereDate('tanggal_absensi', $tanggal)
+                ->first();
+
+            if ($existingAbsensi) {
+                return back()
+                    ->withErrors(['tanggal' => "Absensi untuk {$pegawai->nama_pegawai} pada tanggal tersebut sudah tercatat."])
+                    ->withInput();
+            }
+
+            // Cek apakah sudah ada pengajuan pada tanggal yang sama
+            $existingPengajuan = DB::table('pengajuan')
+                ->where('pegawai_id', $pegawaiId)
+                ->whereDate('tanggal_pengajuan', $tanggal)
+                ->first();
+
+            if ($existingPengajuan) {
+                return back()
+                    ->withErrors(['tanggal' => "Sudah ada catatan pengajuan ({$existingPengajuan->jenis_pengajuan}) untuk {$pegawai->nama_pegawai} pada tanggal tersebut."])
+                    ->withInput();
+            }
+
+            // Ambil jadwal kerja aktif untuk organization ini
+            $activeSchedule = DB::table('jadwal_kerja')
+                ->where('organization_id', $orgId)
+                ->orderByDesc('jadwal_id')
+                ->first();
+
+            DB::table('absensi')->insert([
+                'pegawai_id'       => $pegawaiId,
+                'tanggal_absensi'  => $tanggal,
+                'jam_checkin'      => null,
+                'jam_checkout'     => null,
+                'skema_kerja'      => $jenis,
+                'status_kehadiran' => 'Hadir',
+                'catatan'          => $keterangan,
+                'jadwal_id'        => $activeSchedule ? $activeSchedule->jadwal_id : null,
+                'created_by'       => $user->akun_id,
+                'source'           => 'MANUAL',
+                'created_at'       => now(),
+                'updated_at'       => now(),
+            ]);
+
+            logHelpers::record(
+                $user->akun_id,
+                "Mencatat absensi {$jenis} untuk {$pegawai->nama_pegawai} pada {$tanggal}"
+            );
+
+            return redirect()
+                ->route('admin.persetujuan')
+                ->with('success', "Absensi {$jenis} untuk {$pegawai->nama_pegawai} berhasil dicatat.");
+
+        } elseif (in_array($jenis, $jenisPengajuan, true)) {
+            // ── Sakit / Izin / Cuti / Dinas / Tidak Masuk / Lainnya → insert ke tabel pengajuan ──
+
+            // Cek duplicate pengajuan
+            $existingPengajuan = DB::table('pengajuan')
+                ->where('pegawai_id', $pegawaiId)
+                ->whereDate('tanggal_pengajuan', $tanggal)
+                ->first();
+
+            if ($existingPengajuan) {
+                return back()
+                    ->withErrors(['tanggal' => "Sudah ada catatan pengajuan ({$existingPengajuan->jenis_pengajuan}) untuk {$pegawai->nama_pegawai} pada tanggal tersebut."])
+                    ->withInput();
+            }
+
+            // Cek apakah sudah ada absensi pada tanggal yang sama
+            $existingAbsensi = DB::table('absensi')
+                ->where('pegawai_id', $pegawaiId)
+                ->whereDate('tanggal_absensi', $tanggal)
+                ->first();
+
+            if ($existingAbsensi) {
+                return back()
+                    ->withErrors(['tanggal' => "Absensi untuk {$pegawai->nama_pegawai} pada tanggal tersebut sudah tercatat ({$existingAbsensi->skema_kerja})."])
+                    ->withInput();
+            }
+
+            DB::table('pengajuan')->insert([
+                'pegawai_id'       => $pegawaiId,
+                'jenis_pengajuan'  => $jenis,
+                'tanggal_pengajuan' => $tanggal,
+                'keterangan'       => $keterangan,
+                'status_pengajuan' => 'Disetujui',
+                'created_by'       => $user->akun_id,
+                'source'           => 'MANUAL',
+                'created_at'       => now(),
+                'updated_at'       => now(),
+            ]);
+
+            logHelpers::record(
+                $user->akun_id,
+                "Mencatat {$jenis} untuk {$pegawai->nama_pegawai} pada {$tanggal}"
+            );
+
+            return redirect()
+                ->route('admin.persetujuan')
+                ->with('success', "Catatan {$jenis} untuk {$pegawai->nama_pegawai} berhasil disimpan.");
+
+        } else {
+            return back()
+                ->withErrors(['jenis' => 'Jenis catatan tidak valid.'])
+                ->withInput();
+        }
     }
 }

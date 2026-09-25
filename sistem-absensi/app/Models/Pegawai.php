@@ -26,6 +26,7 @@ class Pegawai extends Model
         'jabatan_id',
         'status',
         'foto_profile',
+        'organization_id',
     ];
 
     public function akun(): HasOne
@@ -51,5 +52,10 @@ class Pegawai extends Model
     public function absensi(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(Attendance::class, 'pegawai_id', 'pegawai_id');
+    }
+
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class, 'organization_id', 'organization_id');
     }
 }

@@ -16,5 +16,11 @@ class WorkSchedule extends Model
         'tanggal_berlaku',
         'jam_masuk',
         'jam_pulang',
+        'organization_id',
     ];
+
+    public function organization(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Organization::class, 'organization_id', 'organization_id');
+    }
 }

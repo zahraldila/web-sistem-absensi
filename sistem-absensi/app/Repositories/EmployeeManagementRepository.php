@@ -15,23 +15,32 @@ class EmployeeManagementRepository
 {
     public function query(): Builder
     {
-        return Pegawai::query()->with(['akun.roleAkses', 'masterDivisi', 'masterJabatan', 'nfc']);
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
+        return Pegawai::query()
+            ->where('organization_id', $orgId)
+            ->with(['akun.roleAkses', 'masterDivisi', 'masterJabatan', 'nfc']);
     }
 
     public function findByPegawaiId(int $pegawaiId): ?Pegawai
     {
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
         return Pegawai::with(['akun.roleAkses', 'masterDivisi', 'masterJabatan', 'nfc'])
+            ->where('organization_id', $orgId)
             ->where('pegawai_id', $pegawaiId)
             ->first();
     }
 
     public function create(array $data): Pegawai
     {
+        $data['organization_id'] = \App\Helpers\OrganizationHelper::requireActiveOrganization();
         return Pegawai::create($data);
     }
 
     public function update(Pegawai $pegawai, array $data): Pegawai
     {
+        if ($pegawai->organization_id !== \App\Helpers\OrganizationHelper::requireActiveOrganization()) {
+            abort(403, 'Akses ditolak.');
+        }
         $pegawai->update($data);
 
         return $pegawai;
@@ -85,28 +94,39 @@ class EmployeeManagementRepository
 
     public function getDivisions(): Collection
     {
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
         return MasterDivisi::query()
+            ->where('organization_id', $orgId)
             ->orderBy('nama_divisi')
             ->get();
     }
 
     public function getRoles(): Collection
     {
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
         return MasterJabatan::query()
+            ->where('organization_id', $orgId)
             ->orderBy('nama_jabatan')
             ->get();
     }
 
     public function getMasterRoles(): Collection
     {
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
         return Role::query()
+            ->where(function ($q) use ($orgId) {
+                $q->whereNull('organization_id')
+                  ->orWhere('organization_id', $orgId);
+            })
             ->orderBy('role_id')
             ->get();
     }
 
     public function getAccountsForExport(array $filters = []): Collection
     {
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
         $query = Pegawai::with(['akun', 'masterDivisi', 'masterJabatan'])
+            ->where('organization_id', $orgId)
             ->when(!empty($filters['status']), function ($q) use ($filters) {
                 $q->where('status', $filters['status']);
             })
@@ -126,11 +146,13 @@ class EmployeeManagementRepository
 
     public function createDivision(array $data): MasterDivisi
     {
+        $data['organization_id'] = \App\Helpers\OrganizationHelper::requireActiveOrganization();
         return MasterDivisi::create($data);
     }
 
     public function createRole(array $data): MasterJabatan
     {
+        $data['organization_id'] = \App\Helpers\OrganizationHelper::requireActiveOrganization();
         return MasterJabatan::create($data);
     }
 }

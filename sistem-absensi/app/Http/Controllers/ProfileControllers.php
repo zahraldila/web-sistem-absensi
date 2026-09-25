@@ -54,6 +54,7 @@ class ProfileControllers extends Controller
 
         // 4. Update tabel 'pegawai'
         DB::table('pegawai')
+            ->where('organization_id', \App\Helpers\OrganizationHelper::requireActiveOrganization())
             ->where('pegawai_id', $pegawaiId)
             ->update($updateData);
 

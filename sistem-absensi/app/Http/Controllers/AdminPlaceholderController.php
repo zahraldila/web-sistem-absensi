@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use App\Helpers\OrganizationHelper;
 
 class AdminPlaceholderController extends Controller
 {
@@ -39,6 +40,8 @@ class AdminPlaceholderController extends Controller
     public function tampilanBranding(Request $request)
     {
         try {
+            $orgId = OrganizationHelper::requireActiveOrganization();
+            
             $savedColor = \App\Models\Setting::get('primary_color', '#123D91');
             $savedLogo  = company_logo_url();
             $activeTab  = $request->query('tab', 'branding');
@@ -70,12 +73,7 @@ class AdminPlaceholderController extends Controller
             }
             // ── /Tahap 4B ─────────────────────────────────────────────────────
 
-            $daftarLokasi = DB::table('lokasi_kantor')->get();
-            foreach ($daftarLokasi as $lokasi) {
-                $lokasi->wifis = DB::table('wifi_kantor')
-                    ->where('lokasi_id', $lokasi->lokasi_id)
-                    ->get();
-            }
+            $daftarLokasi = DB::table('lokasi_kantor')->where('organization_id', $orgId)->get();
 
             // Data Master Role & Privileges untuk Tab Role & Hak Akses
             $daftarRole = \App\Models\Role::with('privileges')->withCount('akun')->orderBy('role_id')->get();
@@ -110,6 +108,19 @@ class AdminPlaceholderController extends Controller
         try {
             $role = \App\Models\Role::findOrFail($request->role_id);
             $privilegeIds = $request->input('privilege_ids', []);
+
+            $user = Auth::user();
+            $isSuperAdmin = $user && (strtolower($user->role) === 'super admin' || $user->role_id === 1);
+            $orgId = OrganizationHelper::requireActiveOrganization();
+
+            if (!$isSuperAdmin) {
+                if ($role->organization_id !== $orgId) {
+                    abort(403, 'Akses ditolak: Anda tidak memiliki izin untuk memodifikasi role dari organisasi lain.');
+                }
+                if (is_null($role->organization_id)) {
+                    abort(403, 'Akses ditolak: Anda tidak memiliki izin untuk memodifikasi Global Role.');
+                }
+            }
 
             // Proteksi Super Admin: Hak akses inti Kelola Role & Hak Akses wajib selalu aktif
             $isSuperAdmin = strcasecmp($role->nama_role, 'Super Admin') === 0 || $role->role_id === 1;
@@ -172,9 +183,12 @@ class AdminPlaceholderController extends Controller
         }
 
         try {
+            $orgId = OrganizationHelper::requireActiveOrganization();
+            
             $role = \App\Models\Role::create([
                 'nama_role' => trim($request->nama_role),
                 'deskripsi' => $request->filled('deskripsi') ? trim($request->deskripsi) : null,
+                'organization_id' => $orgId, // Inject active organization ID
             ]);
 
             // Catat log aktivitas
@@ -210,6 +224,19 @@ class AdminPlaceholderController extends Controller
                 return redirect()
                     ->route('admin.tampilan-branding', ['tab' => 'roles'])
                     ->with('error', 'Data role tidak ditemukan.');
+            }
+
+            $user = Auth::user();
+            $isSuperAdmin = $user && (strtolower($user->role) === 'super admin' || $user->role_id === 1);
+            $orgId = OrganizationHelper::requireActiveOrganization();
+
+            if (!$isSuperAdmin) {
+                if ($role->organization_id !== $orgId) {
+                    abort(403, 'Akses ditolak: Anda tidak memiliki izin untuk menghapus role dari organisasi lain.');
+                }
+                if (is_null($role->organization_id)) {
+                    abort(403, 'Akses ditolak: Anda tidak memiliki izin untuk menghapus Global Role.');
+                }
             }
 
             // Proteksi Super Admin demi integritas sistem
@@ -298,13 +325,15 @@ class AdminPlaceholderController extends Controller
 
     public function resetBranding()
     {
+        $orgId = OrganizationHelper::requireActiveOrganization();
+        
         $oldLogo = \App\Models\Setting::get('company_logo');
         if ($oldLogo) {
             $this->deleteCompanyLogo($oldLogo);
         }
 
-        \App\Models\Setting::where('key', 'primary_color')->delete();
-        \App\Models\Setting::where('key', 'company_logo')->delete();
+        \App\Models\Setting::where('organization_id', $orgId)->where('key', 'primary_color')->delete();
+        \App\Models\Setting::where('organization_id', $orgId)->where('key', 'company_logo')->delete();
     
         // Catat aktivitas admin
         $user = Auth::user();
@@ -358,7 +387,6 @@ class AdminPlaceholderController extends Controller
             'latitude'      => 'required|numeric',
             'longitude'     => 'required|numeric',
             'radius_meter'  => 'required|integer|min:1',
-            'wifi_ssids'    => 'nullable|string',
         ]);
 
         $lokasiId = $request->input('lokasi_id');
@@ -366,12 +394,14 @@ class AdminPlaceholderController extends Controller
         $latitude = (float) $request->input('latitude');
         $longitude = (float) $request->input('longitude');
         $radiusMeter = (int) $request->input('radius_meter');
-        $wifiSsids = $request->input('wifi_ssids', '');
 
         try {
+            $orgId = OrganizationHelper::requireActiveOrganization();
+            
             if ($lokasiId) {
                 // Update existing location
                 DB::table('lokasi_kantor')
+                    ->where('organization_id', $orgId)
                     ->where('lokasi_id', $lokasiId)
                     ->update([
                         'nama_kantor'  => $namaKantor,
@@ -385,6 +415,7 @@ class AdminPlaceholderController extends Controller
                 // Insert new location
                 $lokasiId = DB::table('lokasi_kantor')
                     ->insertGetId([
+                        'organization_id' => $orgId,
                         'nama_kantor'  => $namaKantor,
                         'latitude'     => $latitude,
                         'longitude'    => $longitude,
@@ -394,28 +425,7 @@ class AdminPlaceholderController extends Controller
                 $pesan = "Kantor cabang '{$namaKantor}' berhasil ditambahkan.";
             }
 
-            // Sync Wi-Fi SSIDs if provided
-            if ($wifiSsids !== null) {
-                $ssids = array_filter(array_map('trim', explode(',', $wifiSsids)));
 
-                // Unlink old wifis for this location
-                DB::table('wifi_kantor')->where('lokasi_id', $lokasiId)->delete();
-
-                foreach ($ssids as $ssid) {
-                    $trimmed = trim($ssid);
-                    if (!empty($trimmed)) {
-                        $randomHex = substr(md5($trimmed), 0, 12);
-                        $formattedBssid = implode(':', str_split($randomHex, 2));
-
-                        DB::table('wifi_kantor')->insert([
-                            'lokasi_id' => $lokasiId,
-                            'ssid'      => $trimmed,
-                            'bssid'     => $formattedBssid,
-                            'aktif'     => true,
-                        ]);
-                    }
-                }
-            }
 
             // Audit log with integer akun_id
             $user = Auth::user();
@@ -434,16 +444,19 @@ class AdminPlaceholderController extends Controller
 
     public function hapusLokasi($id)
     {
+        $orgId = OrganizationHelper::requireActiveOrganization();
+        
         try {
-            $lokasi = DB::table('lokasi_kantor')->where('lokasi_id', $id)->first();
+            $lokasi = DB::table('lokasi_kantor')
+                ->where('organization_id', $orgId)
+                ->where('lokasi_id', $id)
+                ->first();
+                
             if (!$lokasi) {
-                return redirect()->route('admin.tampilan-branding', ['tab' => 'lokasi'])->with('error', 'Data kantor cabang tidak ditemukan.');
+                return redirect()->route('admin.tampilan-branding', ['tab' => 'lokasi'])->with('error', 'Data kantor cabang tidak ditemukan atau bukan milik organisasi Anda.');
             }
 
             $nama = $lokasi->nama_kantor;
-
-            // Unlink Wi-Fis
-            DB::table('wifi_kantor')->where('lokasi_id', $id)->delete();
 
             // Delete location
             DB::table('lokasi_kantor')->where('lokasi_id', $id)->delete();
@@ -465,26 +478,27 @@ class AdminPlaceholderController extends Controller
 
     protected function uploadCompanyLogo($file): string
     {
-        $bucket = config('supabase.assets_bucket', 'company-assets');
+        $orgId = \App\Helpers\OrganizationHelper::requireActiveOrganization();
         $ext = $file->getClientOriginalExtension() ?: $file->extension() ?: 'png';
         $fileName = 'logo_' . time() . '_' . Str::random(6) . '.' . strtolower($ext);
-        $remotePath = 'logos/' . $fileName;
+        $remotePath = 'logos/organization-' . $orgId . '/' . $fileName;
 
         $baseUrl = supabase_url() ?: config('supabase.url');
-        if (! $baseUrl) {
-            throw new \RuntimeException('Supabase URL belum dikonfigurasi. Pastikan SUPABASE_URL di .env terisi.');
+        $apiKey = supabase_key() ?: config('supabase.key');
+
+        // Fallback to local storage if Supabase is not configured
+        if (! $baseUrl || ! $apiKey) {
+            $file->storeAs('logos', $fileName, 'public');
+            return 'storage/' . $remotePath;
         }
 
+        $bucket = config('supabase.assets_bucket', 'company-assets');
         $baseUrl = rtrim($baseUrl, '/');
         if (! preg_match('/^https?:\/\//i', $baseUrl)) {
             $baseUrl = 'https://' . ltrim($baseUrl, '/');
         }
 
         $uploadUrl = $baseUrl . '/storage/v1/object/' . rawurlencode($bucket) . '/' . $remotePath;
-        $apiKey = supabase_key() ?: config('supabase.key');
-        if (! $apiKey) {
-            throw new \RuntimeException('Supabase key belum dikonfigurasi. Pastikan SUPABASE_KEY di .env terisi.');
-        }
 
         $resp = Http::withHeaders([
             'Authorization' => 'Bearer ' . $apiKey,
@@ -515,6 +529,16 @@ class AdminPlaceholderController extends Controller
         }
 
         $path = trim($path);
+        
+        // Handle local storage deletion
+        if (str_starts_with($path, 'storage/')) {
+            $localPath = substr($path, strlen('storage/'));
+            if (\Illuminate\Support\Facades\Storage::disk('public')->exists($localPath)) {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete($localPath);
+            }
+            return;
+        }
+        
         if (preg_match('/^https?:\/\//i', $path) || str_starts_with($path, 'images/') || str_starts_with($path, 'assets/') || str_ends_with($path, 'logo-sip.png')) {
             return;
         }

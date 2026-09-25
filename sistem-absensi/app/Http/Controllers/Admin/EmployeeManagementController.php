@@ -9,6 +9,7 @@ use App\Services\EmployeeManagementService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
+use App\Helpers\OrganizationHelper;
 
 class EmployeeManagementController extends Controller
 {
@@ -34,16 +35,44 @@ class EmployeeManagementController extends Controller
 
     public function store(Request $request)
     {
+        $orgId = OrganizationHelper::requireActiveOrganization();
+        
         $data = $request->validate([
-            'nip' => 'required|string|max:50|unique:pegawai,nip',
+            'nip' => [
+                'required', 'string', 'max:50',
+                Rule::unique('pegawai', 'nip')->where('organization_id', $orgId)
+            ],
             'nama_pegawai' => 'required|string|max:255',
             'nfc_id' => 'nullable|string|max:255',
-            'email' => 'nullable|email|max:255|unique:pegawai,email',
+            'email' => [
+                'nullable', 'email', 'max:255',
+                Rule::unique('pegawai', 'email')->where('organization_id', $orgId)
+            ],
             'no_handphone' => 'nullable|string|regex:/^[0-9]+$/|max:20',
             'foto_profile' => 'nullable|mimes:jpg,jpeg,png|max:2048',
-            'divisi_id' => 'nullable|integer|exists:master_divisi,divisi_id',
-            'jabatan_id' => 'nullable|integer|exists:master_jabatan,jabatan_id',
-            'role_id' => 'nullable|integer|exists:role,role_id',
+            'divisi_id' => [
+                'nullable', 'integer',
+                Rule::exists('master_divisi', 'divisi_id')->where('organization_id', $orgId)
+            ],
+            'jabatan_id' => [
+                'nullable', 'integer',
+                Rule::exists('master_jabatan', 'jabatan_id')->where('organization_id', $orgId)
+            ],
+            'role_id' => [
+                'nullable', 'integer',
+                Rule::exists('role', 'role_id')->where(function ($q) use ($orgId) {
+                    $q->where(function($q2) use ($orgId) {
+                        $q2->whereNull('organization_id')->orWhere('organization_id', $orgId);
+                    });
+                    
+                    // Prevent assigning Super Admin unless the current user is a Super Admin
+                    $user = Auth::user();
+                    $isSuperAdmin = $user && (strtolower($user->role) === 'super admin' || $user->role_id === 1);
+                    if (!$isSuperAdmin) {
+                        $q->where('role_id', '!=', 1)->where('nama_role', '!=', 'Super Admin');
+                    }
+                })
+            ],
             'role' => 'required|string|max:50',
             'username' => ['nullable', 'string', 'max:100', 'unique:akun,username'],
             'password' => 'required|string|min:6|confirmed',
@@ -100,6 +129,11 @@ class EmployeeManagementController extends Controller
 
     public function edit(Pegawai $pegawai)
     {
+        // Verify ownership
+        if ($pegawai->organization_id !== OrganizationHelper::requireActiveOrganization()) {
+            abort(403, 'Akses ditolak.');
+        }
+
         $employee = $this->service->getEmployee($pegawai->pegawai_id);
         $filters = $this->service->getFilterOptions();
 
@@ -108,16 +142,53 @@ class EmployeeManagementController extends Controller
 
     public function update(Request $request, Pegawai $pegawai)
     {
+        $orgId = OrganizationHelper::requireActiveOrganization();
+        
+        // Verify ownership
+        if ($pegawai->organization_id !== $orgId) {
+            abort(403, 'Akses ditolak.');
+        }
+
         $data = $request->validate([
-            'nip' => 'nullable|string|max:50|unique:pegawai,nip,' . $pegawai->pegawai_id . ',pegawai_id',
+            'nip' => [
+                'nullable', 'string', 'max:50',
+                Rule::unique('pegawai', 'nip')
+                    ->where('organization_id', $orgId)
+                    ->ignore($pegawai->pegawai_id, 'pegawai_id')
+            ],
             'nama_pegawai' => 'required|string|max:255',
             'nfc_id' => 'nullable|string|max:255',
-            'email' => 'nullable|email|max:255|unique:pegawai,email,' . $pegawai->pegawai_id . ',pegawai_id',
+            'email' => [
+                'nullable', 'email', 'max:255',
+                Rule::unique('pegawai', 'email')
+                    ->where('organization_id', $orgId)
+                    ->ignore($pegawai->pegawai_id, 'pegawai_id')
+            ],
             'no_handphone' => 'nullable|string|regex:/^[0-9]+$/|max:20',
             'foto_profile' => 'nullable|mimes:jpg,jpeg,png|max:2048',
-            'divisi_id' => 'nullable|integer|exists:master_divisi,divisi_id',
-            'jabatan_id' => 'nullable|integer|exists:master_jabatan,jabatan_id',
-            'role_id' => 'nullable|integer|exists:role,role_id',
+            'divisi_id' => [
+                'nullable', 'integer',
+                Rule::exists('master_divisi', 'divisi_id')->where('organization_id', $orgId)
+            ],
+            'jabatan_id' => [
+                'nullable', 'integer',
+                Rule::exists('master_jabatan', 'jabatan_id')->where('organization_id', $orgId)
+            ],
+            'role_id' => [
+                'nullable', 'integer',
+                Rule::exists('role', 'role_id')->where(function ($q) use ($orgId) {
+                    $q->where(function($q2) use ($orgId) {
+                        $q2->whereNull('organization_id')->orWhere('organization_id', $orgId);
+                    });
+                    
+                    // Prevent assigning Super Admin unless the current user is a Super Admin
+                    $user = Auth::user();
+                    $isSuperAdmin = $user && (strtolower($user->role) === 'super admin' || $user->role_id === 1);
+                    if (!$isSuperAdmin) {
+                        $q->where('role_id', '!=', 1)->where('nama_role', '!=', 'Super Admin');
+                    }
+                })
+            ],
             'role' => 'nullable|string|max:50',
             'username' => [
                 'nullable',
@@ -177,8 +248,13 @@ class EmployeeManagementController extends Controller
 
     public function storeDivision(Request $request)
     {
+        $orgId = OrganizationHelper::requireActiveOrganization();
+        
         $data = $request->validate([
-            'nama_divisi' => 'required|string|max:255|unique:master_divisi,nama_divisi',
+            'nama_divisi' => [
+                'required', 'string', 'max:255',
+                Rule::unique('master_divisi', 'nama_divisi')->where('organization_id', $orgId)
+            ],
         ], [
             'nama_divisi.required' => 'Nama divisi wajib diisi.',
             'nama_divisi.unique' => 'Nama divisi sudah ada.',
@@ -206,8 +282,13 @@ class EmployeeManagementController extends Controller
 
     public function storeRole(Request $request)
     {
+        $orgId = OrganizationHelper::requireActiveOrganization();
+        
         $data = $request->validate([
-            'nama_jabatan' => 'required|string|max:255|unique:master_jabatan,nama_jabatan',
+            'nama_jabatan' => [
+                'required', 'string', 'max:255',
+                Rule::unique('master_jabatan', 'nama_jabatan')->where('organization_id', $orgId)
+            ],
         ], [
             'nama_jabatan.required' => 'Nama jabatan wajib diisi.',
             'nama_jabatan.unique' => 'Nama jabatan sudah ada.',
